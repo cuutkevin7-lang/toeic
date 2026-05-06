@@ -403,6 +403,7 @@
                 <div class="flex bg-gray-100 dark:bg-white/5 p-1 rounded-xl">
                     <button onclick="filterFavorites(`fav`)" id="tab-fav" class="tab-btn active px-4 py-2 rounded-lg text-sm font-bold transition-all">收藏單字</button>
                     <button onclick="filterFavorites(`err`)" id="tab-err" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all">錯題記錄</button>
+                    <button onclick="filterFavorites(`studied`)" id="tab-studied" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all">已讀單字</button>
                 </div>
             </div>
 
@@ -4028,7 +4029,16 @@
             quizSeconds: 0,
             favorites: JSON.parse(localStorage.getItem(`toeic_fav`) || `[]`),
             errors: JSON.parse(localStorage.getItem(`toeic_err`) || `[]`),
-            progress: parseInt(localStorage.getItem(`toeic_progress`) || `0`),
+            progress: (() => {
+                const today = new Date().toDateString();
+                const lastDate = localStorage.getItem(`toeic_progress_date`);
+                if (lastDate !== today) {
+                    localStorage.setItem(`toeic_progress`, `0`);
+                    localStorage.setItem(`toeic_progress_date`, today);
+                    return 0;
+                }
+                return parseInt(localStorage.getItem(`toeic_progress`) || `0`);
+            })(),
             goal: 10,
             isDarkMode: localStorage.getItem(`toeic_dark`) === `true`
         };
@@ -4156,6 +4166,7 @@
         function incrementProgress() {
             state.progress++;
             localStorage.setItem(`toeic_progress`, state.progress);
+            localStorage.setItem(`toeic_progress_date`, new Date().toDateString());
             updateProgress();
         }
 
@@ -4545,9 +4556,47 @@
         function filterFavorites(type) {
             document.getElementById(`tab-fav`).classList.toggle(`active`, type === `fav`);
             document.getElementById(`tab-err`).classList.toggle(`active`, type === `err`);
+            document.getElementById(`tab-studied`).classList.toggle(`active`, type === `studied`);
+
+            const listEl = document.getElementById(`favoritesList`);
+
+            if (type === `studied`) {
+                const studiedWords = JSON.parse(localStorage.getItem(`toeic_studied`) || `[]`);
+                if (studiedWords.length === 0) {
+                    listEl.innerHTML = `<div class="col-span-full py-20 text-center text-gray-400">尚未讀過任何單字，<br>翻開字卡後單字會記錄在這裡。</div>`;
+                    return;
+                }
+                const clearBtn = `<div class="col-span-full flex justify-between items-center mb-2">
+                    <span class="text-sm text-gray-400">共 ${studiedWords.length} 個已讀單字</span>
+                    <button onclick="clearStudied()" class="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-300 rounded-xl text-sm font-bold hover:bg-red-50 hover:text-red-500 transition-all">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        清除紀錄
+                    </button>
+                </div>`;
+                listEl.innerHTML = clearBtn + studiedWords.map(word => {
+                    const wordObj = db.words.find(w => w.word === word);
+                    if (!wordObj) return ``;
+                    const isFav = state.favorites.some(f => f.word === word);
+                    return `
+                    <div class="bg-white dark:bg-[#2d2d2d] p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-white/5 group animate-fade">
+                        <div class="flex justify-between items-start mb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-secondary flex-shrink-0"></span>
+                                <h4 class="text-xl font-bold">${wordObj.word}</h4>
+                            </div>
+                            <button onclick="addStudiedToFavorite('${wordObj.word}')" title="${isFav ? `已在收藏中` : `加入收藏`}"
+                                class="p-1.5 rounded-lg transition-all opacity-0 group-hover:opacity-100 ${isFav ? `text-red-400` : `text-gray-300 hover:text-red-400`}">
+                                <svg class="w-5 h-5" fill="${isFav ? `currentColor` : `none`}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                            </button>
+                        </div>
+                        <p class="text-primary font-medium mb-1">${wordObj.translation}</p>
+                        <p class="text-xs text-gray-400 italic">${wordObj.example || ``}</p>
+                    </div>`;
+                }).join(``);
+                return;
+            }
 
             const list = type === `fav` ? state.favorites : state.errors;
-            const listEl = document.getElementById(`favoritesList`);
             
             if (list.length === 0) {
                 listEl.innerHTML = `<div class="col-span-full py-20 text-center text-gray-400">目前沒有資料</div>`;
@@ -4584,6 +4633,22 @@
                     <p class="text-xs text-gray-400 italic">${item.example}</p>
                 </div>`;
             }).join(``);
+        }
+
+        function clearStudied() {
+            if (!confirm(`確定要清除所有已讀紀錄嗎？`)) return;
+            localStorage.removeItem(`toeic_studied`);
+            filterFavorites(`studied`);
+        }
+
+        function addStudiedToFavorite(word) {
+            const wordObj = db.words.find(w => w.word === word);
+            if (!wordObj) return;
+            if (!state.favorites.some(f => f.word === word)) {
+                state.favorites.push(wordObj);
+                localStorage.setItem(`toeic_fav`, JSON.stringify(state.favorites));
+            }
+            filterFavorites(`studied`);
         }
 
         function addErrorToFavorite(word) {
@@ -4666,6 +4731,5 @@
         // Run App
         init();
     </script>
-    <script src="https://cdn.kuse.ai/sdk.prd.js"></script>
 </body>
 </html>
