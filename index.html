@@ -290,6 +290,15 @@
                 <h2 class="text-2xl font-bold">選擇出題來源</h2>
             </div>
             <div class="max-w-md mx-auto space-y-4">
+                <!-- Question Count Selector -->
+                <div class="bg-white dark:bg-[#2d2d2d] rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-white/5">
+                    <p class="text-sm font-bold text-gray-500 dark:text-gray-400 mb-3">選擇題目數量</p>
+                    <div class="flex gap-3">
+                        <button onclick="setQuizCount(10)" id="quizCount10" class="quiz-count-btn flex-1 py-3 rounded-xl font-bold text-sm border-2 border-primary bg-primary text-white transition-all">10 題</button>
+                        <button onclick="setQuizCount(20)" id="quizCount20" class="quiz-count-btn flex-1 py-3 rounded-xl font-bold text-sm border-2 border-gray-200 dark:border-white/10 text-gray-500 dark:text-gray-400 hover:border-primary transition-all">20 題</button>
+                        <button onclick="setQuizCount(30)" id="quizCount30" class="quiz-count-btn flex-1 py-3 rounded-xl font-bold text-sm border-2 border-gray-200 dark:border-white/10 text-gray-500 dark:text-gray-400 hover:border-primary transition-all">30 題</button>
+                    </div>
+                </div>
                 <button onclick="startQuizFromSource('studied')" class="w-full group p-6 bg-white dark:bg-[#2d2d2d] rounded-2xl border-2 border-gray-100 dark:border-white/5 hover:border-primary transition-all shadow-sm hover:shadow-lg text-left">
                     <div class="flex items-center gap-4">
                         <div class="w-14 h-14 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-center text-primary group-hover:scale-110 transition-transform flex-shrink-0">
@@ -4285,12 +4294,28 @@
         }
 
         // AI Powered Quiz Engine
+        // Quiz count selector
+        state.quizCount = 10;
+        function setQuizCount(n) {
+            state.quizCount = n;
+            [10, 20, 30].forEach(v => {
+                const btn = document.getElementById(`quizCount${v}`);
+                if (v === n) {
+                    btn.classList.add(`border-primary`, `bg-primary`, `text-white`);
+                    btn.classList.remove(`border-gray-200`, `dark:border-white/10`, `text-gray-500`, `dark:text-gray-400`);
+                } else {
+                    btn.classList.remove(`border-primary`, `bg-primary`, `text-white`);
+                    btn.classList.add(`border-gray-200`, `text-gray-500`);
+                }
+            });
+        }
+
         function showQuizSelect() {
             // Update counts
             const studied = JSON.parse(localStorage.getItem(`toeic_studied`) || `[]`);
             const studiedEl = document.getElementById(`studiedCount`);
             if (studied.length > 0) {
-                studiedEl.textContent = `共 ${studied.length} 個已讀單字`;
+                studiedEl.textContent = `共 ${studied.length} 個已讀單字${studied.length < state.quizCount ? `（將出 ${studied.length} 題）` : ``}`;
                 studiedEl.parentElement.parentElement.parentElement.disabled = false;
             } else {
                 studiedEl.textContent = `尚無已讀記錄，請先翻閱字卡`;
@@ -4300,7 +4325,7 @@
             const favCount = state.favorites.length;
             const favEl = document.getElementById(`favQuizCount`);
             if (favCount > 0) {
-                favEl.textContent = `共 ${favCount} 個收藏單字`;
+                favEl.textContent = `共 ${favCount} 個收藏單字${favCount < state.quizCount ? `（將出 ${favCount} 題）` : ``}`;
             } else {
                 favEl.textContent = `單字本是空的，請先收藏單字`;
                 favEl.style.color = `#9ca3af`;
@@ -4328,13 +4353,16 @@
                 }
             } else {
                 // All words: prioritize errors
-                const errorWords = state.errors.slice(0, 3);
-                const randomWords = [...db.words].sort(() => Math.random() - 0.5).slice(0, 10 - errorWords.length);
+                const errorWords = state.errors.slice(0, Math.min(3, state.quizCount));
+                const randomWords = [...db.words].sort(() => Math.random() - 0.5).slice(0, state.quizCount - errorWords.length);
                 pool = [...errorWords, ...randomWords];
             }
 
-            // Pick up to 10 words
-            state.quizList = pool.sort(() => Math.random() - 0.5).slice(0, 10);
+            // Pick up to selected count
+            if (pool.length < state.quizCount) {
+                // Use all available words if less than requested
+            }
+            state.quizList = pool.sort(() => Math.random() - 0.5).slice(0, state.quizCount);
             state.quizIdx = 0;
             state.quizScore = 0;
             state.quizActive = true;
@@ -4526,18 +4554,65 @@
                 return;
             }
 
-            listEl.innerHTML = list.map(item => `
+            const bulkBtnHtml = type === `err` ? `
+                <div class="col-span-full flex justify-end mb-2">
+                    <button onclick="addAllErrorsToFavorites()" class="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-bold hover:bg-blue-600 transition-all shadow-sm">
+                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                        全部加入收藏
+                    </button>
+                </div>` : ``;
+
+            listEl.innerHTML = bulkBtnHtml + list.map(item => {
+                const isFav = state.favorites.some(f => f.word === item.word);
+                const favBtn = type === `err` ? `
+                    <button onclick="addErrorToFavorite('${item.word}')" title="${isFav ? `已在收藏中` : `加入收藏`}"
+                        class="p-1.5 rounded-lg transition-all ${isFav ? `text-red-400` : `text-gray-300 hover:text-red-400`}">
+                        <svg class="w-5 h-5" fill="${isFav ? `currentColor` : `none`}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg>
+                    </button>` : ``;
+                return `
                 <div class="bg-white dark:bg-[#2d2d2d] p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-white/5 group animate-fade">
                     <div class="flex justify-between items-start mb-2">
                         <h4 class="text-xl font-bold">${item.word}</h4>
-                        <button onclick="removeListItem('${item.word}', '${type}')" class="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                        </button>
+                        <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            ${favBtn}
+                            <button onclick="removeListItem('${item.word}', '${type}')" class="p-1.5 text-gray-300 hover:text-red-500 transition-colors">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </div>
                     </div>
                     <p class="text-primary font-medium mb-1">${item.translation}</p>
                     <p class="text-xs text-gray-400 italic">${item.example}</p>
-                </div>
-            `).join(``);
+                </div>`;
+            }).join(``);
+        }
+
+        function addErrorToFavorite(word) {
+            const errWord = state.errors.find(e => e.word === word);
+            if (!errWord) return;
+            if (!state.favorites.some(f => f.word === word)) {
+                state.favorites.push(errWord);
+                localStorage.setItem(`toeic_fav`, JSON.stringify(state.favorites));
+            }
+            filterFavorites(`err`);
+        }
+
+        function addAllErrorsToFavorites() {
+            let added = 0;
+            state.errors.forEach(errWord => {
+                if (!state.favorites.some(f => f.word === errWord.word)) {
+                    state.favorites.push(errWord);
+                    added++;
+                }
+            });
+            localStorage.setItem(`toeic_fav`, JSON.stringify(state.favorites));
+            filterFavorites(`err`);
+            if (added > 0) {
+                const toast = document.createElement(`div`);
+                toast.className = `fixed bottom-6 left-1/2 -translate-x-1/2 bg-primary text-white px-5 py-3 rounded-2xl font-bold shadow-lg z-50 animate-fade`;
+                toast.textContent = `已將 ${added} 個錯題加入收藏 \u2764\ufe0f`;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 2500);
+            }
         }
 
         function removeListItem(word, type) {
